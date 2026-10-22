@@ -41,6 +41,7 @@ import CustomLayerPopup from "./CustomLayers/CustomLayerPopup.js";
 import { simName, hideAirport } from "../util/utility.js";
 import Storage from "../Storage.js";
 import uid from "../util/uid.js";
+import EnvironmentLayers from './EnvironmentLayers.js';
 
 const storage = new Storage();
 
@@ -1098,6 +1099,7 @@ function LayerControl(props) {
         >
           <CloseIcon />
         </IconButton>
+        <EnvironmentLayers map={props.map} />
         <Typography variant="h6" gutterBottom>Basemap</Typography>
         <BasemapBtn src={imgs[0]} selected={basemap === 0} onClick={() => setBasemapId(0)} label="Default" />
         <BasemapBtn src={imgs[1]} selected={basemap === 1} onClick={() => setBasemapId(1)} label="Alternative" />

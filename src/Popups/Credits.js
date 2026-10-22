@@ -116,6 +116,19 @@ function CreditsPopup(props) {
       <DialogContent dividers sx={{ px: 3, pt: 0 }}>
         <div hidden={expanded !== 0}>
           <Paper sx={styles.content}>
+            <Typography variant="h5" sx={styles.version}>v1.19.9 (2026-10-22)</Typography>
+            <Typography variant="h6">New</Typography>
+            <List dense>
+              <ListItem>VATSIM coverage and Weather / METAR overlays, plus weather map layers for clouds, precipitation, and rain radar</ListItem>
+              <ListItem>Route Finder can prefer or require live ATC coverage and observed airport weather</ListItem>
+            </List>
+            <Typography variant="h6">Changed</Typography>
+            <List dense>
+              <ListItem>Cloud cover uses the latest complete day. Rain radar stretches its last supported zoom</ListItem>
+              <ListItem>Updated simulator airport identifiers</ListItem>
+            </List>
+          </Paper>
+          <Paper sx={styles.content}>
             <Typography variant="h5" sx={styles.version}>v1.19.8 (2026-10-17)</Typography>
             <Typography variant="h6">New</Typography>
             <List dense>

@@ -33,6 +33,11 @@ import { hideAirport, Plane } from "../util/utility.js";
 import log from "../util/logger.js";
 import Storage from "../Storage.js";
 
+import EnvironmentOptions from './EnvironmentOptions.js';
+import { useEnvironment } from '../Environment/EnvironmentProvider.js';
+import { activePolicy, normalizePolicy, isFresh, VATSIM_MAX_AGE_MS } from '../Environment/defaults.mjs';
+import { createEvaluator } from '../Environment/evaluate.mjs';
+
 import aircrafts from "../data/aircraft.json";
 
 const storage = new Storage();
@@ -54,6 +59,20 @@ const styles = {
 const Routing = React.memo((props) => {
   const [savedSelections] = React.useState(() => storage.get('routeFinderSelections', {}));
   const savedAircraft = aircrafts[savedSelections.aircraftSpecsModel] ? new Plane(savedSelections.aircraftSpecsModel) : null;
+  const [environmentPolicy, setEnvironmentPolicy] = React.useState(() => normalizePolicy(storage.get('environmentPolicyV1', {})));
+  const environmentOptions = React.useMemo(() => ({
+    weatherSource: environmentPolicy.weatherSource,
+    refreshIntervalSec: environmentPolicy.refreshIntervalSec,
+  }), [environmentPolicy.weatherSource, environmentPolicy.refreshIntervalSec]);
+  const environment = useEnvironment(activePolicy(environmentPolicy) && !props.hidden, environmentOptions);
+  const [searchError, setSearchError] = React.useState('');
+  const [rejections, setRejections] = React.useState({});
+  const searchSequence = React.useRef(0);
+  const workersRef = React.useRef([]);
+  const searchEvaluator = React.useRef(null);
+  const detailCache = React.useRef(new Map());
+  React.useEffect(() => { storage.set('environmentPolicyV1', normalizePolicy(environmentPolicy)); }, [environmentPolicy]);
+  React.useEffect(() => () => { searchSequence.current++; workersRef.current.forEach(w => w.terminate()); }, []);
   const [results, setResults] = React.useState(null);
   const [loading, setLoading] = React.useState(false);
   const [nbResults, setNbResults] = React.useState(0);
@@ -104,13 +123,43 @@ const Routing = React.memo((props) => {
   const icaodataArr = React.useMemo(() => Object.values(props.options.icaodata), [props.options.icaodata]);
 
   const setRoute = props.setRoute;
+
+  const toggleSaveResult = (result) => {
+    if (savedResultsUids.has(result.uid)) {
+      setSavedResultsUids(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(result.uid);
+        return newSet;
+      });
+      setSavedResults(prev => prev.filter(r => r.uid !== result.uid));
+    }
+    else {
+      setSavedResultsUids(prev => new Set([...prev, result.uid]));
+      setSavedResults(prev => [...prev, result]);
+    }
+  };
+
+  const clearSavedResults = () => {
+    setSavedResultsUids(new Set());
+    setSavedResults([]);
+  };
+  const enrichRoute = React.useCallback(result => {
+    if (!result?.environment || !searchEvaluator.current) return result;
+    if (!detailCache.current.has(result.id)) {
+      detailCache.current.set(result.id, { ...result, environment: searchEvaluator.current.evaluate(result.icaos, { details: true, speed: result.plane?.speed || Number(speed) || 0 }) });
+      if (detailCache.current.size > 20) detailCache.current.delete(detailCache.current.keys().next().value);
+    }
+    return detailCache.current.get(result.id);
+  }, [speed]);
+  const previewRoute = React.useCallback(result => setRoute(enrichRoute(result)), [setRoute, enrichRoute]);
   const showDetail = React.useCallback((result) => {
-    setFocus(result);
-    setRoute(result);
+    const detailedResult = enrichRoute(result);
+    setFocus(detailedResult);
+    setRoute(detailedResult);
     // Center map on route
     const b = getBounds(result.icaos.map(elm => props.options.icaodata[elm]));
     props.mapRef.current.fitBounds([[b.minLat, b.minLng], [b.maxLat, b.maxLng]]);
-  }, [props.options.icaodata, props.mapRef, setRoute]);
+  }, [props.options.icaodata, props.mapRef, setRoute, enrichRoute]);
 
   // Update list of available aircraft models
   React.useEffect(() => {
@@ -310,7 +359,6 @@ const Routing = React.memo((props) => {
       allResults[i].rentalCost = Math.ceil(rentalCost);
       allResults[i].fuelCost = Math.ceil(fuelCost);
       allResults[i].plane = plane;
-      allResults[i].uid = `${allResults[i].icaos.join('-')}-${allResults[i].model}-${allResults[i].pay}-${allResults[i].time}`;
     }
 
     setResults(allResults);
@@ -318,10 +366,33 @@ const Routing = React.memo((props) => {
     setCancel(null);
   }
 
-  const startSearch = () => {
+  const startSearch = async () => {
+    const searchId = ++searchSequence.current;
+    const policy = normalizePolicy(environmentPolicy);
+    setSearchError(''); setRejections({});
+    let searchEnvironment = null;
+
     setProgress(0);
     setLoading(true);
     setNbResults(0);
+
+    if (activePolicy(policy)) {
+      searchEnvironment = await environment.refresh();
+      if (searchId !== searchSequence.current) return;
+      const strictAtc = ['departure', 'arrival', 'enroute'].some(k => policy[k] === 'require');
+      if (strictAtc && (!isFresh(searchEnvironment.vatsim?.sourceUpdatedAt, Date.now(), VATSIM_MAX_AGE_MS) || !searchEnvironment.airspace?.features?.length)) {
+        setSearchError('Required VATSIM data is missing or stale. Refresh live data before searching.');
+        setLoading(false); return;
+      }
+      if (policy.weather === 'require' && !searchEnvironment.weather?.observations) {
+        setSearchError('Required weather data is unavailable. Refresh live data before searching.');
+        setLoading(false); return;
+      }
+    }
+    const searchTime = Date.now();
+    searchEvaluator.current = activePolicy(policy) ? createEvaluator(searchEnvironment, props.options.icaodata, policy, searchTime) : null;
+    detailCache.current.clear();
+    const rejected = {};
 
     // Check ICAO if free mode
     if (type === 'free') {
@@ -397,6 +468,7 @@ const Routing = React.memo((props) => {
       }
     }
     const total = icaos.length;
+    if (!total) { setSearchError('No available starting airports match this search.'); setLoading(false); return; }
 
     const paxSys = jobsType.includes("pax-sys");
     const paxTrip = jobsType.includes("pax-trip");
@@ -456,7 +528,7 @@ const Routing = React.memo((props) => {
       }
     }
 
-    let maxWorkers = navigator.hardwareConcurrency || 4;
+    let maxWorkers = Math.min(navigator.hardwareConcurrency || 4, total, activePolicy(policy) ? 4 : Infinity);
     if (memory === 'vlow') { maxWorkers = Math.min(maxWorkers, 2); }
     if (memory === 'low') { maxWorkers = Math.min(maxWorkers, 4); }
     let done = 0;
@@ -494,6 +566,7 @@ const Routing = React.memo((props) => {
         }
       }
       worker.postMessage({
+        searchId,
         fromIcao: icao,
         toIcao: type === 'rent' ? (loop ? icao : null) : (toIcao ? toIcao : null),
         heading: heading === '' ? false : parseInt(heading, 10),
@@ -517,7 +590,15 @@ const Routing = React.memo((props) => {
       });
     };
     const onmessage = ({data}, worker) => {
+      if (data.searchId !== searchSequence.current) return;
+      if (data.status === 'error') {
+        workersRef.current.forEach(w => w.terminate()); workersRef.current = [];
+        searchSequence.current++; setLoading(false); setCancel(null);
+        setSearchError(data.message || 'Route search failed'); return;
+      }
+
       if (data.status === 'finished') {
+        for (const [reason, count] of Object.entries(data.rejected || {})) rejected[reason] = (rejected[reason] || 0) + count;
         allResults = allResults.concat(data.results);
         setNbResults(allResults.length);
         done += 1;
@@ -528,15 +609,13 @@ const Routing = React.memo((props) => {
         else {
           worker.terminate();
           if (done >= total) {
+            workersRef.current = []; setRejections(rejected);
             prepResults(allResults, planesSpecs);
           }
         }
       }
       else if (data.status === 'progress') {
         setProgress(prev => prev + (data.progress/total));
-      }
-      else {
-        console.log(data);
       }
     };
     log.info("Executing Route Finder", {
@@ -554,46 +633,29 @@ const Routing = React.memo((props) => {
     });
     const workers = [];
     for (var i = 0; i < maxWorkers; i++) {
+      const icao = icaos.pop();
+      if (!icao) { break; }
       const worker = new RoutingWorker();
       worker.onmessage = (evt) => onmessage(evt, worker);
-      let icao = icaos.pop();
-      if (!icao) { break; }
+      worker.onerror = evt => onmessage({ data: { status: 'error', searchId, message: evt.message } }, worker);
+      worker.postMessage({ type: 'init', searchId, searchTime, environment: searchEnvironment, environmentPolicy: policy });
       execute(worker, icao);
       workers.push(worker);
     }
+    workersRef.current = workers;
     setCancel(workers);
 
   };
 
   const cancelWorkers = () => {
-    for (const worker of cancel) {
+    searchSequence.current++;
+    for (const worker of workersRef.current) {
       worker.terminate();
     }
+    workersRef.current = [];
     setLoading(false);
     setCancel(null);
   }
-
-  // Save/unsave a result for future reference
-  const toggleSaveResult = (result) => {
-    if (savedResultsUids.has(result.uid)) {
-      setSavedResultsUids(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(result.uid);
-        return newSet;
-      });
-      setSavedResults(prev => prev.filter(r => r.uid !== result.uid));
-    }
-    else {
-      setSavedResultsUids(prev => new Set([...prev, result.uid]));
-      setSavedResults(prev => [...prev, result]);
-    }
-  };
-
-  // Clear all saved results
-  const clearSavedResults = () => {
-    setSavedResultsUids(new Set());
-    setSavedResults([]);
-  };
 
   if (props.hidden) { return null; }
 
@@ -632,21 +694,26 @@ const Routing = React.memo((props) => {
           <CloseIcon />
         </IconButton>
       </Typography>
+      {searchError && <Alert severity="warning" sx={{ mx: 2, mb: 1 }}>{searchError}</Alert>}
       {results && !loading &&
         <React.Fragment>
           <Results
             showDetail={showDetail}
-            setRoute={props.setRoute}
+            setRoute={previewRoute}
             goTo={props.actions.current.goTo}
+            actions={props.actions}
+            options={props.options}
             icaodataArr={icaodataArr}
             close={() => {
               setResults(null);
               props.setRoute(null);
               setMoreSettings(false);
             }}
+            rejections={rejections}
             results={results}
             savedResultsUids={savedResultsUids}
             clearSavedResults={clearSavedResults}
+            type={type}
             display={focus ? false : true}
           />
 
@@ -668,6 +735,7 @@ const Routing = React.memo((props) => {
       {!results && !loading &&
         <Box sx={{ ...styles.content, ...{ p: 2 }}}>
 
+          <EnvironmentOptions value={environmentPolicy} onChange={setEnvironmentPolicy} environment={environment} />
           <ToggleButtonGroup
             value={type}
             exclusive
@@ -1327,7 +1395,6 @@ const Routing = React.memo((props) => {
               color="primary"
               size="large"
               onClick={startSearch}
-              sx={{ m: 1}}
               disabled={
                 !maxHops || maxStops === '' || minLoad === '' || maxBadLegs === '' || idleTime === ''
                          || overheadLength === '' || approachLength === '' || maxEmptyLeg === '' || minDistLeg === ''
@@ -1340,8 +1407,8 @@ const Routing = React.memo((props) => {
             <Button
               size="large"
               disabled={savedResults.length === 0}
-              sx={{ m: 1}}
-              startIcon={<StarIcon sx={{ color: savedResults.length === 0 ? "inherit" : "gold" }} />}
+              sx={{ m: 1 }}
+              startIcon={<StarIcon sx={{ color: savedResults.length === 0 ? 'inherit' : 'gold' }} />}
               onClick={() => setResults(savedResults)}
             >
               View saved routes

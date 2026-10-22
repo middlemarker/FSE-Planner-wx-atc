@@ -6,6 +6,23 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 
 
+## [1.19.9] - 2026-10-22
+
+### Added
+- VATSIM coverage and Weather / METAR map overlays, including a coverage opacity control
+- Weather map layers for clouds, precipitation, and rain radar, each with its own provider, time, and opacity
+- Route Finder settings to turn ATC coverage and observed airport weather off, prefer them, or require them
+- A local environment service for VATSIM, NOAA METAR, airspace boundaries, and weather tiles
+
+### Changed
+- Cloud cover uses the latest complete daily composite. Clear sky is a faint veil and cloud is dark grey
+- Rain radar and the precipitation nowcast stretch the last supported zoom instead of showing the provider's unsupported-zoom image
+- Weather tiles with no data are hatched. Clear weather inside a covered tile is left clear
+- The live-environment panel keeps the controls on screen. Warnings and errors open from an icon
+- Updated simulator airport identifiers
+
+
+
 ## [1.19.8] - 2026-10-17
 
 ### Added

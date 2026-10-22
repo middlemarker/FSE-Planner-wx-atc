@@ -5,6 +5,7 @@ import './index.css';
 import App from './App';
 import Theme from './Theme.js';
 import ErrorBoundary from './ErrorBoundary.js';
+import { EnvironmentProvider } from './Environment/EnvironmentProvider.js';
 
 const container = document.getElementById('root');
 const root = createRoot(container);
@@ -14,7 +15,7 @@ root.render(
     <StyledEngineProvider injectFirst>
       <ThemeProvider theme={Theme}>
         <ErrorBoundary>
-          <App />
+          <EnvironmentProvider><App /></EnvironmentProvider>
         </ErrorBoundary>
       </ThemeProvider>
     </StyledEngineProvider>

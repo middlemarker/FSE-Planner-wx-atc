@@ -3,6 +3,7 @@ import L from "leaflet";
 
 import Marker from "./Components/Marker.js";
 import Job from "./Components/Job.js";
+import { wrapLon } from '../Environment/geometry.mjs';
 
 
 function Route(props) {
@@ -67,6 +68,18 @@ function Route(props) {
       toIcao: to
     })
       .addTo(group);
+  }
+
+  // Display the same frozen, densified path used to evaluate coverage.
+  if (route.environment?.policy.enroute !== 'off') {
+    const center = Number(s.display.map.center) || 0;
+    for (const leg of route.environment?.legs || []) for (const segment of leg.segments || []) {
+      const fromLon = center + wrapLon(segment.from[0] - center);
+      const toLon = fromLon + wrapLon(segment.to[0] - fromLon);
+      L.polyline([[segment.from[1], fromLon], [segment.to[1], toLon]], {
+        color: leg.unknown ? '#777' : segment.covered ? '#16813c' : '#c62828', weight: 3, opacity: 0.9, interactive: false
+      }).addTo(group);
+    }
   }
 
   // Add markers to map

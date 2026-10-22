@@ -19,6 +19,13 @@ import L from "leaflet";
 import { AirportSVG } from "./Icons.js";
 import AirportIcon from "./AirportIcon.js";
 import { airportSurface, simName, wrapNb } from "../../util/utility.js"
+import { getLiveSnapshot } from "../../Environment/liveSnapshot.mjs";
+import { weatherForAirport } from "../../Environment/weather.mjs";
+
+function airportMetar(icao) {
+  const live = getLiveSnapshot();
+  return weatherForAirport(icao, live.weather, live.airspace?.aliases).raw || '';
+}
 
 
 const styles = {
@@ -121,6 +128,7 @@ function Popup(props) {
   }
 
   const lon = wrapNb(icaodata[icao].lon, 0).toFixed(4);
+  const metar = airportMetar(icao);
 
   return (
     <React.Fragment>
@@ -228,6 +236,7 @@ function Popup(props) {
       <Box sx={styles.popupPart}>
         <Typography variant="body2" sx={styles.popupLabel}>Position: {Math.abs(icaodata[icao].lat)}{icaodata[icao].lat >= 0 ? 'N' : 'S'} {Math.abs(lon)}{lon >= 0 ? 'E' : 'W'}, {icaodata[icao].elev} feet</Typography>
         <Typography variant="body2" sx={styles.popupLabel}>Runway: {icaodata[icao].runway} feet of {airportSurface(icaodata[icao].surface)}</Typography>
+        {metar && <Typography variant="body2" sx={{ ...styles.popupLabel, overflowWrap: 'anywhere' }}>METAR: {metar}</Typography>}
         { props.forsale &&
           <Typography variant="body2" sx={styles.popupLabel}>For sale: ${props.forsale.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".")}</Typography>
         }
@@ -295,6 +304,12 @@ function Marker({position, size, color, sim, allJobs, ...props}) {
       allJobs: allJobs,
     }
   )
+    .bindTooltip(() => {
+      const metar = airportMetar(props.icao);
+      const div = document.createElement('div');
+      div.textContent = metar ? `${props.icao} ${metar}` : props.icao;
+      return div;
+    }, { direction: 'top', opacity: 0.95 })
     .bindPopup(() => {
       var div = document.createElement('div');
       const root = createRoot(div);

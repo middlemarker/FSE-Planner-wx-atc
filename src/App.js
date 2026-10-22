@@ -398,6 +398,7 @@ function App() {
   const setActions = () => {
     actions.current = {
       goTo: goTo,
+      goToGps: goToGps,
       fromIcao: (icao) => setFilters(prev => {
         const f = {...prev};
         f.fromIcao = icao;
@@ -466,7 +467,7 @@ function App() {
     };
   }
   if (!actions.current) { setActions(); }
-  React.useEffect(setActions, [goTo, filters.fromIcao, filters.toIcao]);
+  React.useEffect(setActions, [goTo, goToGps, filters.fromIcao, filters.toIcao]);
 
   React.useEffect(() => {
     const inputs = searchInput.split(/\s*[><]+\s*/g);

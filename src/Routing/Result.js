@@ -25,6 +25,8 @@ import Link from '@mui/material/Link';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
 import StarIcon from '@mui/icons-material/Star';
 
+import EnvironmentSummary from '../Environment/EnvironmentSummary.js';
+
 import PDFRoute from './PDFRoute.js';
 import AddToFlight from '../Table/AddToFlight.js';
 import { pdf } from '@react-pdf/renderer';
@@ -110,6 +112,7 @@ function Result({focus, setFocus, options, ...props}) {
           <ArrowBackIcon />&nbsp;Back to results
         </Typography>
       </Box>
+      <EnvironmentSummary result={focus} detailed airports={options.icaodata} />
       <Box sx={{
         overflowX: "hidden",
         overflowY: "auto",
