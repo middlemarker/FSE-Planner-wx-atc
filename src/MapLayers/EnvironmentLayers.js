@@ -1,6 +1,6 @@
 import React from 'react';
 import L from 'leaflet';
-import { Box, Typography, Checkbox, FormControlLabel, Button, IconButton, Popover, FormControl, Select, MenuItem, Slider } from '@mui/material';
+import { Box, Typography, Checkbox, FormControlLabel, IconButton, Popover, FormControl, Select, MenuItem, Slider } from '@mui/material';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlineOutlined';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
@@ -11,6 +11,7 @@ import { wrapLon, containsPoint } from '../Environment/geometry.mjs';
 import { CATEGORY_COLORS, isFresh, VATSIM_MAX_AGE_MS, WEATHER_MAX_AGE_MS } from '../Environment/defaults.mjs';
 import { formatVisibility, formatWind } from '../Environment/weather.mjs';
 import { coverageHatchSegments, coverageTileSample, coverageZoomLadder, effectiveNativeZoom, isUnsupportedZoomNotice, recolorCloudFractionPixels, tileHasVisibleCoverage } from './weatherTiles.mjs';
+import { layerProductTime, shortUpdated } from './layerTime.mjs';
 
 const cloudSymbols = { CLR: '○', SKC: '○', NSC: '○', NCD: '○', FEW: '◔', SCT: '◑', BKN: '◕', OVC: '●', VV: '⊗', OVX: '⊗', UNKNOWN: '?' };
 const WEATHER_TYPE_ORDER = [
@@ -62,6 +63,12 @@ function utcTime(value) {
   if (!value) return null;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(11, 16) + ' UTC';
+}
+function layerLabel(name, time, stale = false) {
+  return <Box component="span" sx={{ display: 'inline-flex', alignItems: 'baseline' }}>
+    {name}
+    {time ? <Typography component="span" variant="caption" sx={{ ml: 0.75, color: stale ? 'warning.main' : 'text.secondary', fontSize: '0.7rem', whiteSpace: 'nowrap' }}>{time}</Typography> : null}
+  </Box>;
 }
 function isStandingNote(text) {
   return /provider-styled|stretched view|contributing radar|latest complete daily|light hatch/i.test(text);
@@ -284,6 +291,7 @@ export default function EnvironmentLayers({ map }) {
   const [layerLoadingCount, setLayerLoadingCount] = React.useState(0);
   const [layerReload, setLayerReload] = React.useState(0);
   const weatherRasterRef = React.useRef(new Map());
+  const preferLatestRef = React.useRef(false);
   const live = useEnvironment(visible.vatsim || visible.weather);
   const { snapshot, now } = live;
   const airports = snapshot.airspace?.airports;
@@ -332,8 +340,13 @@ export default function EnvironmentLayers({ map }) {
   }, [layerCatalog, types]);
   React.useEffect(() => {
     const currentSelections = selectionsRef.current;
-    if (!visible.weatherMap || !currentSelections) { setLayerViews({}); return undefined; }
+    if (!visible.weatherMap || !currentSelections) {
+      preferLatestRef.current = false;
+      setLayerViews({});
+      return undefined;
+    }
     const controller = new AbortController();
+    const preferLatest = preferLatestRef.current;
     const jobs = types.flatMap(type => {
       const selection = currentSelections[type.id];
       if (!selection?.enabled || !selection.provider) return [];
@@ -345,7 +358,7 @@ export default function EnvironmentLayers({ map }) {
         if (!timelineResponse.ok) throw new Error(`HTTP ${timelineResponse.status}`);
         const timeline = await timelineResponse.json();
         const frames = timeline.slices || [];
-        const slice = frames.some(frame => frame.id === selection.slice) ? selection.slice : (timeline.selected || frames[0]?.id || '');
+        const slice = !preferLatest && frames.some(frame => frame.id === selection.slice) ? selection.slice : (timeline.selected || frames[0]?.id || '');
         if (slice !== selection.slice) {
           setVisible(current => {
             const currentSelection = current.weatherSelections?.[type.id];
@@ -366,6 +379,7 @@ export default function EnvironmentLayers({ map }) {
     });
     Promise.all(jobs).then(results => {
       if (controller.signal.aborted) return;
+      preferLatestRef.current = false;
       const next = {};
       for (const result of results) if (result) next[result.id] = result;
       setLayerViews(next);
@@ -571,9 +585,22 @@ export default function EnvironmentLayers({ map }) {
     }
   }
   const weatherNoticeSeverity = weatherNotices.some(notice => notice.severity === 'error') ? 'error' : 'warning';
+  const refreshing = live.loading || layerLoading;
+  const refreshLayers = () => {
+    preferLatestRef.current = true;
+    live.refresh();
+    setLayerReload(count => count + 1);
+  };
+  const vatsimUpdated = shortUpdated(snapshot.vatsim?.sourceUpdatedAt || snapshot.vatsim?.fetchedAt, now);
+  const metarUpdated = shortUpdated(snapshot.weather?.fetchedAt || snapshot.weather?.sourceUpdatedAt, now);
   return <Box sx={{ mt: 2, borderTop: '1px solid #ddd', pt: 1 }}>
-    <Typography variant="subtitle1">Live environment</Typography>
-    <FormControlLabel label="VATSIM coverage" control={<Checkbox checked={visible.vatsim} onChange={e => setVisible(v => ({ ...v, vatsim: e.target.checked }))} />} />
+    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+      <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>Live environment</Typography>
+      <IconButton size="small" disabled={refreshing} aria-label="Refresh weather and VATSIM" onClick={refreshLayers}>
+        <RefreshIcon fontSize="small" sx={refreshing ? { animation: 'fse-layer-spin 0.8s linear infinite', '@keyframes fse-layer-spin': { to: { transform: 'rotate(360deg)' } } } : undefined} />
+      </IconButton>
+    </Box>
+    <FormControlLabel label={layerLabel('VATSIM coverage', vatsimUpdated, Boolean(snapshot.vatsim) && !fresh)} control={<Checkbox checked={visible.vatsim} onChange={e => setVisible(v => ({ ...v, vatsim: e.target.checked }))} />} />
     {visible.vatsim && <Box sx={{ px: 1 }}>
       <Slider
         size="small"
@@ -588,17 +615,15 @@ export default function EnvironmentLayers({ map }) {
       />
     </Box>}
     <Box sx={{ display: 'flex', alignItems: 'center' }}>
-      <FormControlLabel label="Weather / METAR" control={<Checkbox checked={visible.weather} onChange={e => setVisible(v => ({ ...v, weather: e.target.checked }))} />} />
+      <FormControlLabel label={layerLabel('Weather / METAR', metarUpdated, Boolean(snapshot.weather) && !isFresh(snapshot.weather.fetchedAt || snapshot.weather.sourceUpdatedAt, now, WEATHER_MAX_AGE_MS))} control={<Checkbox checked={visible.weather} onChange={e => setVisible(v => ({ ...v, weather: e.target.checked }))} />} />
       {live.errors.weather && <IconButton size="small" color="warning" aria-label="Weather problem" onClick={event => setWeatherErrorEl(event.currentTarget)}><ErrorOutlineIcon fontSize="small" /></IconButton>}
     </Box>
     <Popover open={Boolean(weatherErrorEl)} anchorEl={weatherErrorEl} onClose={() => setWeatherErrorEl(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}>
       <Typography variant="body2" sx={{ p: 1.5, maxWidth: 260 }}>{String(live.errors.weather || '').replace(/^weather:\s*/i, '')}</Typography>
     </Popover>
-    {(visible.vatsim || visible.weather) && <Button size="small" disabled={live.loading} onClick={live.refresh}>{live.loading ? 'Updating…' : 'Refresh'}</Button>}
     <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid #eee' }}>
       <Box sx={{ display: 'flex', alignItems: 'center' }}>
         <FormControlLabel label="Weather map layers" control={<Checkbox checked={visible.weatherMap} onChange={e => setVisible(v => ({ ...v, weatherMap: e.target.checked }))} />} />
-        {visible.weatherMap && <IconButton size="small" disabled={layerLoading} aria-label="Refresh weather layers" onClick={() => setLayerReload(n => n + 1)}><RefreshIcon fontSize="small" /></IconButton>}
         {weatherNotices.length > 0 && <IconButton size="small" color={weatherNoticeSeverity} aria-label="Weather layer notices" onClick={event => setLayerNoticeEl(event.currentTarget)}><ErrorOutlineIcon fontSize="small" /></IconButton>}
       </Box>
       <Popover open={Boolean(layerNoticeEl)} anchorEl={layerNoticeEl} onClose={() => setLayerNoticeEl(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}>
@@ -618,7 +643,7 @@ export default function EnvironmentLayers({ map }) {
           const frameIndex = Math.max(0, frames.findIndex(item => item.id === frame?.id));
           return <Box key={type.id}>
             <FormControlLabel
-              label={type.label}
+              label={layerLabel(type.label, selection.enabled ? layerProductTime(view, now) : '')}
               control={<Checkbox checked={selection.enabled} onChange={event => updateSelection(type.id, { enabled: event.target.checked, provider: providerId })} />}
             />
             {selection.enabled && <>
