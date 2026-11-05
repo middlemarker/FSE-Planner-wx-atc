@@ -1,0 +1,18 @@
+---
+description: Current VATSIM and weather-map behavior for this fork
+alwaysApply: true
+---
+
+This project is middlemarker/FSE-Planner-wx-atc on branch weather-atc-layers-work. Read AGENTS.md before changing weather, VATSIM, or route-search behavior.
+
+The environment API in server/ is required for VATSIM, METAR, airspace, and weather tiles. Do not point the browser at NOAA, VATSIM status, or bookings directly.
+
+Weather map rules already implemented:
+
+- Several weather types can be visible at once. Precipitation is above clouds.
+- Missing coverage is hatched. Do not hatch clear sky or zero precipitation inside a covered tile.
+- Clouds use the latest complete daily GIBS composite. Clear sky stays faintly visible. Clouds are dark grey.
+- RainViewer native zoom stops at 7. Higher map zooms stretch that tile. Never display the provider's unsupported-zoom image.
+- The layers panel stays limited to controls. Put warnings and errors behind the status icon.
+
+GFS cloud ceiling is not implemented. Do not describe it as available.

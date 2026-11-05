@@ -1,9 +1,9 @@
 # ATC and Weather Planning Design Notes
 
-This workspace is not currently a git repository, so there is no local
-"last commit" to diff against. This document describes the active working
-tree changes made during this session, especially the ATC and weather
-planner features, so another AI model or engineer can continue safely.
+This document describes the ATC and weather planner features so another
+engineer can continue safely. The work is on branch `weather-atc-layers-work`
+in this repository. Current run instructions and layer behavior are in
+`AGENTS.md`.
 
 ## Goals
 
