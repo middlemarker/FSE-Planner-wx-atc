@@ -67,6 +67,14 @@ To install your own instance of FSE Planner on a web server, execute the followi
 
 ## Developer instructions
 
+On Windows, check Node.js, install dependencies, and confirm the local weather/VATSIM service with:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+The script asks before installing anything, asks which folder to use, and writes `local.settings.ps1` plus `.env.development.local`. Start both processes afterward with `.\start-local.ps1`.
+
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
 In the project directory, you can run:
 
